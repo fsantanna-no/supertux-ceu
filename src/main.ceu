@@ -1,0 +1,88 @@
+#include "sdl.ceu"
+
+input void SDL_REDRAW;
+input void SDL_QUIT;
+
+#include "menus.ceu"
+
+native do
+    int WIN_W = 640;
+    int WIN_H = 480;
+end
+
+var _SDL_Window* win;
+    finalize
+        win = _SDL_CreateWindow("Super Tux", 0, 0, _WIN_W, _WIN_H, 0);
+    with
+        _SDL_DestroyWindow(win);
+    end
+
+native do
+    SDL_Renderer* REN;
+end
+_REN = _SDL_CreateRenderer(win, -1, 0);
+    finalize with
+        _SDL_DestroyRenderer(_REN);
+    end
+_SDL_SetRenderDrawBlendMode(_REN, _SDL_BLENDMODE_BLEND);
+
+var _SDL_Rect bg;
+    bg.x = 0;
+    bg.y = 0;
+    bg.w = 640;
+    bg.h = 480;
+
+_TTF_Init();
+    finalize with
+        _TTF_Quit();
+    end
+
+native do
+    TTF_Font* FONT;
+end
+    _FONT = _TTF_OpenFont("Deutsch.ttf", 25);
+    finalize with
+        _TTF_CloseFont(_FONT);
+    end
+
+_Mix_OpenAudio(22050, _AUDIO_S16SYS, 2, 4096);
+    finalize with
+        _Mix_CloseAudio();
+    end
+var _Mix_Chunk* snd;
+    finalize
+        snd = _Mix_LoadWAV("click1.wav");
+    with
+        _Mix_FreeChunk(snd);
+    end
+
+par/or do
+    await SDL_QUIT;
+with
+    every SDL_REDRAW do
+        _SDL_SetRenderDrawColor(_REN, 0x00,0x00,0x00,0xFF);
+        _SDL_RenderFillRect(_REN, &bg);
+    end
+with
+    loop do
+        var MainMenu main;
+        par/or do
+            await main.items[__MENUS_CEU_main_Exit].ui:ok_clicked;
+            break;
+        with
+            await main.items[__MENUS_CEU_main_Bonus].ui:ok_clicked;
+            var BonusMenu bonus;
+            await bonus.items[__MENUS_CEU_bonus_Back].ui:ok_clicked;
+        end
+    end
+with
+    every 5s do
+        _Mix_PlayChannel(-1, snd, 0);
+    end
+with
+    every SDL_REDRAW do
+        _SDL_RenderPresent(_REN);
+    end
+end
+
+return 0;

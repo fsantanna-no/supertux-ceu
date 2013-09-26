@@ -1,0 +1,265 @@
+#include "colors.ceu"
+#include "ui-texture.ceu"
+#include "ui-grid.ceu"
+
+input _SDL_KeyboardEvent* SDL_KEYDOWN;
+
+class MenusAnim with
+    var UI* ui  = null;
+    var int dt  = 0;
+    var int sig = 0;
+do
+    _assert(this.ui  != null);
+    _assert(this.sig != 0);
+    _assert(this.dt   > 0);
+
+    var int y = ui:rect.y;
+        finalize with
+            ui:rect.y = y;      // finish in the initial position
+        end
+
+    if this.sig == 1 then
+        ui:rect.y = ui:rect.y - _WIN_H/2;
+    else
+        ui:rect.y = ui:rect.y + _WIN_H/2;
+    end
+
+    var int dy = (y - ui:rect.y) * sig;
+
+    loop do
+        await 25ms;
+        ui:rect.y = ui:rect.y + 25*dy/this.dt * sig;
+        if ui:rect.y*sig > y*sig then
+            break;
+        end
+    end
+end
+
+class TitleMenu with
+    // no interface
+do
+    // background
+    var _SDL_Texture* bg_tex = null;
+        finalize
+            bg_tex = _IMG_LoadTexture(_REN,
+                        "../data/images/title/background.png");
+        with
+            _SDL_DestroyTexture(bg_tex);
+        end
+
+    var _SDL_Rect bg_rect;
+        bg_rect.x = _WIN_W / 2;
+        bg_rect.y = _WIN_H / 2;
+
+    var UITexture bg with
+        this.ren = _REN;
+        this.tex = bg_tex;
+    end;
+    bg._go(&bg_rect);
+
+    // logo
+    var _SDL_Texture* logo_tex = null;
+        finalize
+            logo_tex = _IMG_LoadTexture(_REN,
+                        "../data/images/title/logo.png");
+        with
+            _SDL_DestroyTexture(logo_tex);
+        end
+
+    var _SDL_Rect logo_rect;
+        logo_rect.x = _WIN_W / 2;
+        logo_rect.y =  30;
+
+    var UITexture logo with
+        this.ren = _REN;
+        this.tex = logo_tex;
+        this.align_y = _UI_ALIGN_TOP;
+    end;
+    logo._go(&logo_rect);
+
+    await FOREVER;
+end
+
+class MenuItem with
+    var _char* text;
+    var UI*    ui;
+
+    event void   go_toggle;
+do
+    var _SDL_Texture* tex_white;
+        finalize
+            tex_white = _SDL_text2texture(_REN, _FONT, text,
+                                          &_colors.white, null);
+        with
+            _SDL_DestroyTexture(tex_white);
+        end
+
+    var _SDL_Texture* tex_blue;
+        finalize
+            tex_blue = _SDL_text2texture(_REN, _FONT, text,
+                                         &_colors.blue, null);
+        with
+            _SDL_DestroyTexture(tex_blue);
+        end
+
+    loop do
+    do
+        var UITexture ui_white with
+            this.ren = _REN;
+            this.tex = tex_white;
+        end;
+        finalize
+            this.ui = &ui_white;
+        with
+            nothing;    // either white or blue
+        end
+        await this.go_toggle;
+    end
+    do
+
+        var UITexture ui_blue with
+            this.ren = _REN;
+            this.tex = tex_blue;
+        end;
+        finalize
+            this.ui = &ui_blue;
+        with
+            nothing;    // either white or blue
+        end
+        await this.go_toggle;
+    end
+    end
+end
+
+class Menu with
+    var int       n;
+    var MenuItem* items;
+
+    event int ok;
+do
+    var UIGrid grid with
+        this.ren = _REN;
+        this.lay_lins = n;
+        this.lay_cols = 1;
+        this.lay = __MENUS_CEU_grid;
+        this.uis_n = n;
+        native do
+            int _MENUS_CEU_grid[] = {
+                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+            };
+        end
+        this.spc_y  = 5;
+        this.clr_bg = &_colors.gray_50;
+    end;
+
+    // fill grid
+    loop i, this.n do
+        grid.uis[i] = this.items[i].ui;
+    end
+
+    var _SDL_Rect r;
+        r.x = _WIN_W / 2;
+        r.y = 2 * _WIN_H / 3;
+        r.w = _WIN_W / 2;
+        r.h = _WIN_H / 2;
+    grid._go(&r);
+
+    do
+        var int sig = 1;
+        loop i, this.n do
+            spawn MenusAnim with
+                this.ui  = grid.uis[i];
+                this.dt  = 500;
+                this.sig = sig;
+                sig = sig * -1;
+            end;
+        end
+        await 500ms;
+    end
+
+    var int cur = 0;
+    emit this.items[cur].go_toggle;
+
+    var _SDL_KeyboardEvent* key;
+    every key = SDL_KEYDOWN do
+        if key:keysym.sym == _SDLK_UP then
+            emit this.items[cur].go_toggle;
+            cur = cur - 1;
+            if cur == -1 then
+                cur = this.n - 1;
+            end
+            emit this.items[cur].go_toggle;
+        else/if key:keysym.sym == _SDLK_DOWN then
+            emit this.items[cur].go_toggle;
+            cur = (cur + 1) % this.n;
+            emit this.items[cur].go_toggle;
+        else/if key:keysym.sym == _SDLK_RETURN then
+            emit this.items[cur].ui:ok_clicked;
+        end
+    end
+end
+
+class MainMenu with
+    var MenuItem* items = null;
+do
+    var TitleMenu title;
+
+    native do
+        char _MENUS_CEU_main[][15] = {
+            "Start Game",
+            "Bonus Levels",
+            "Options",
+            "Level Editor",
+            "Exit"
+        };
+        enum {
+            _MENUS_CEU_main_Bonus = 1,
+            _MENUS_CEU_main_Exit  = 4
+        };
+    end
+
+    var int i = 0;
+    var MenuItem[5] items_ with
+        this.text = __MENUS_CEU_main[i];
+        i = i + 1;
+    end;
+    this.items = items_;
+
+    var Menu menu with
+        this.n     = 5;
+        this.items = items;
+    end;
+
+    await FOREVER;
+end
+
+class BonusMenu with
+    var MenuItem* items = null;
+do
+    var TitleMenu title;
+
+    native do
+        char _MENUS_CEU_bonus[][20] = {
+            "Bonus Island I",
+            "Bonus Island II",
+            "Back"
+        };
+        enum {
+            _MENUS_CEU_bonus_Back = 2
+        };
+    end
+
+    var int i = 0;
+    var MenuItem[3] items_ with
+        this.text = __MENUS_CEU_bonus[i];
+        i = i + 1;
+    end;
+    this.items = items_;
+
+    var Menu menu with
+        this.n     = 3;
+        this.items = items;
+    end;
+
+    await FOREVER;
+end
