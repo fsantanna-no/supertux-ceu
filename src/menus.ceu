@@ -13,9 +13,14 @@ do
     _assert(this.sig != 0);
     _assert(this.dt   > 0);
 
+    // TODO
+    ui:align_x = _UI_ALIGN_LEFT;
+    ui:align_y = _UI_ALIGN_TOP;
+
     var int y = ui:rect.y;
         finalize with
             ui:rect.y = y;      // finish in the initial position
+            ui:_go(&ui:rect);
         end
 
     if this.sig == 1 then
@@ -23,12 +28,14 @@ do
     else
         ui:rect.y = ui:rect.y + _WIN_H/2;
     end
+    ui:_go(&ui:rect);
 
     var int dy = (y - ui:rect.y) * sig;
 
     loop do
         await 25ms;
         ui:rect.y = ui:rect.y + 25*dy/this.dt * sig;
+        ui:_go(&ui:rect);
         if ui:rect.y*sig > y*sig then
             break;
         end
@@ -80,11 +87,18 @@ do
     await FOREVER;
 end
 
-class MenuItem with
-    var _char* text;
-    var UI*    ui;
+interface MenuItem with
+    var   UI*    ui;
+    var   int    toFocus?;
+    var   int    focused?;
+    event void   go_focused_toggle;
+end
 
-    event void   go_toggle;
+class MenuItemText with
+    interface MenuItem;
+    var _char* text;
+    var int    toFocus? = 1;
+    var int    focused? = 0;
 do
     var _SDL_Texture* tex_white;
         finalize
@@ -103,40 +117,162 @@ do
         end
 
     loop do
-    do
-        var UITexture ui_white with
-            this.ren = _REN;
-            this.tex = tex_white;
-        end;
-        finalize
-            this.ui = &ui_white;
-        with
-            nothing;    // either white or blue
+        if this.focused? then
+            do
+                var UITexture ui_blue with
+                    this.ren = _REN;
+                    this.tex = tex_blue;
+                end;
+                finalize
+                    this.ui = &ui_blue;
+                with
+                    nothing;    // either white or blue
+                end
+                await this.go_focused_toggle;
+            end
+        else
+            do
+                var UITexture ui_white with
+                    this.ren = _REN;
+                    this.tex = tex_white;
+                end;
+                finalize
+                    this.ui = &ui_white;
+                with
+                    nothing;    // either white or blue
+                end
+                await this.go_focused_toggle;
+            end
         end
-        await this.go_toggle;
+        this.focused? = not this.focused?;
     end
-    do
+end
 
-        var UITexture ui_blue with
-            this.ren = _REN;
-            this.tex = tex_blue;
-        end;
-        finalize
-            this.ui = &ui_blue;
-        with
-            nothing;    // either white or blue
+class MenuItemTextBox with
+    interface MenuItem;
+    var _char* text;
+    var int    toFocus? = 1;
+    var int    focused? = 0;
+    var int    checked? = 0;
+do
+    var UIGrid grid with
+        this.ren = _REN;
+        this.lay_lins = 1;
+        this.lay_cols = 3;
+        this.lay = __MENUS_CEU_box_grid;
+        this.uis_n = 2;
+        native do
+            int _MENUS_CEU_box_grid[] = {
+                 0, 0, 1
+            };
         end
-        await this.go_toggle;
-    end
+        this.spc_y  = 5;
+    end;
+    this.ui = &grid;
+
+    par do
+        var _SDL_Texture* tex_white;
+            finalize
+                tex_white = _SDL_text2texture(_REN, _FONT, text,
+                                              &_colors.white, null);
+            with
+                _SDL_DestroyTexture(tex_white);
+            end
+
+        var _SDL_Texture* tex_blue;
+            finalize
+                tex_blue = _SDL_text2texture(_REN, _FONT, text,
+                                             &_colors.blue, null);
+            with
+                _SDL_DestroyTexture(tex_blue);
+            end
+
+        loop do
+            if this.focused? then
+                do
+                    var UITexture ui_blue with
+                        this.ren = _REN;
+                        this.tex = tex_blue;
+                    end;
+                    grid._go_ui(0, &ui_blue)
+                        finalize with
+                            nothing;    // either white or blue
+                        end;
+                    await this.go_focused_toggle;
+                end
+            else
+                do
+                    var UITexture ui_white with
+                        this.ren = _REN;
+                        this.tex = tex_white;
+                    end;
+                    grid._go_ui(0, &ui_white)
+                        finalize with
+                            nothing;    // either white or blue
+                        end;
+                    await this.go_focused_toggle;
+                end
+            end
+            this.focused? = not this.focused?;
+        end
+    with
+        var _SDL_Texture* off_tex = null;
+            finalize
+                off_tex = _IMG_LoadTexture(_REN,
+                            "../data/images/status/checkbox.png");
+            with
+                _SDL_DestroyTexture(off_tex);
+            end
+
+        var _SDL_Texture* on_tex = null;
+            finalize
+                on_tex = _IMG_LoadTexture(_REN,
+                            "../data/images/status/checkbox-checked.png");
+            with
+                _SDL_DestroyTexture(on_tex);
+            end
+
+        loop do
+            if this.checked? then
+                do
+                    var UITexture on with
+                        this.ren = _REN;
+                        this.tex = on_tex;
+                    end;
+                    grid._go_ui(1, &on)
+                        finalize with
+                            nothing;    // either on or off
+                        end;
+                    await this.ui:ok_clicked;
+                end
+            else
+                do
+                    var UITexture off with
+                        this.ren = _REN;
+                        this.tex = off_tex;
+                    end;
+                    grid._go_ui(1, &off)
+                        finalize with
+                            nothing;    // either on or off
+                        end;
+                    await this.ui:ok_clicked;
+                end
+            end
+            this.checked? = not this.checked?;
+        end
     end
 end
 
 class Menu with
-    var int       n;
-    var MenuItem* items;
+    var int        n     =    0;
+    var MenuItem** items = null;
+    var int        cur   =    0;
 
     event int ok;
 do
+    _assert(this.n      > 0);
+    _assert(this.items != null);
+
     var UIGrid grid with
         this.ren = _REN;
         this.lay_lins = n;
@@ -154,7 +290,7 @@ do
 
     // fill grid
     loop i, this.n do
-        grid.uis[i] = this.items[i].ui;
+        grid.uis[i] = this.items[i]:ui;
     end
 
     var _SDL_Rect r;
@@ -177,30 +313,44 @@ do
         await 500ms;
     end
 
-    var int cur = 0;
-    emit this.items[cur].go_toggle;
+    par do
+        loop do
+            var _SDL_KeyboardEvent* key =
+                await SDL_KEYDOWN
+                until (key:keysym.sym == _SDLK_UP)
+                   or (key:keysym.sym == _SDLK_DOWN);
+            var int nxt = this.cur;
 
-    var _SDL_KeyboardEvent* key;
-    every key = SDL_KEYDOWN do
-        if key:keysym.sym == _SDLK_UP then
-            emit this.items[cur].go_toggle;
-            cur = cur - 1;
-            if cur == -1 then
-                cur = this.n - 1;
+            loop do
+                if key:keysym.sym == _SDLK_UP then
+                    nxt = nxt - 1;
+                    if nxt == -1 then
+                        nxt = this.n - 1;
+                    end
+                else
+                    nxt = (nxt + 1) % this.n;
+                end
+
+                // TODO: tight loop (assert at least one toFocus?=1)
+                if this.items[nxt]:toFocus? then
+                    emit this.items[cur]:go_focused_toggle;
+                    emit this.items[nxt]:go_focused_toggle;
+                    this.cur = nxt;
+                    break;
+                end
             end
-            emit this.items[cur].go_toggle;
-        else/if key:keysym.sym == _SDLK_DOWN then
-            emit this.items[cur].go_toggle;
-            cur = (cur + 1) % this.n;
-            emit this.items[cur].go_toggle;
-        else/if key:keysym.sym == _SDLK_RETURN then
-            emit this.items[cur].ui:ok_clicked;
+        end
+    with
+        loop do
+            var _SDL_KeyboardEvent* key = await SDL_KEYDOWN
+                                          until key:keysym.sym == _SDLK_RETURN;
+            emit this.items[cur]:ui:ok_clicked;
         end
     end
 end
 
 class MainMenu with
-    var MenuItem* items = null;
+    var MenuItem*[5] items;
 do
     var TitleMenu title;
 
@@ -213,17 +363,19 @@ do
             "Exit"
         };
         enum {
-            _MENUS_CEU_main_Bonus = 1,
-            _MENUS_CEU_main_Exit  = 4
+            _MENUS_CEU_main_Bonus   = 1,
+            _MENUS_CEU_main_Options = 2,
+            _MENUS_CEU_main_Exit    = 4
         };
     end
 
     var int i = 0;
-    var MenuItem[5] items_ with
+    var MenuItemText[5] texts with
         this.text = __MENUS_CEU_main[i];
+        this.focused? = (i==0);
+        items[i] = &this;
         i = i + 1;
     end;
-    this.items = items_;
 
     var Menu menu with
         this.n     = 5;
@@ -234,31 +386,90 @@ do
 end
 
 class BonusMenu with
-    var MenuItem* items = null;
+    var MenuItem*[4] items;
 do
     var TitleMenu title;
 
     native do
         char _MENUS_CEU_bonus[][20] = {
+            "Bonus Levels",
             "Bonus Island I",
             "Bonus Island II",
             "Back"
         };
         enum {
-            _MENUS_CEU_bonus_Back = 2
+            _MENUS_CEU_bonus_Back = 3
         };
     end
 
     var int i = 0;
-    var MenuItem[3] items_ with
+    var MenuItemText[4] texts with
         this.text = __MENUS_CEU_bonus[i];
+        this.toFocus? = (i != 0);
+        this.focused? = (i == 1);
+        items[i] = &this;
         i = i + 1;
     end;
-    this.items = items_;
 
     var Menu menu with
-        this.n     = 3;
+        this.n     = 4;
         this.items = items;
+        this.cur   = 1;
+    end;
+
+    await FOREVER;
+end
+
+class OptionsMenu with
+    var MenuItem*[8] items;
+do
+    var TitleMenu title;
+
+    native do
+        char _MENUS_CEU_options[][20] = {
+            "Options",
+            "Keyboard Setup",
+            "Back",
+
+            "OpenGL",
+            "Fullscreen",
+            "Sound",
+            "Music",
+            "Show FPS",
+        };
+        enum {
+            _MENUS_CEU_options_Back = 7
+        };
+    end
+
+    var int i = 0;
+    var MenuItemText[3] texts with
+        this.text = __MENUS_CEU_options[i];
+        this.toFocus? = (i != 0);
+        i = i + 1;
+    end;
+
+    i = 3;
+    var MenuItemTextBox[5] boxes with
+        this.text = __MENUS_CEU_options[i];
+        this.focused? = (i == 3);
+        this.checked? = (i%2 == 0);
+        i = i + 1;
+    end;
+
+    this.items[0] = &texts[0];
+    this.items[1] = &boxes[0];
+    this.items[2] = &boxes[1];
+    this.items[3] = &boxes[2];
+    this.items[4] = &boxes[3];
+    this.items[5] = &boxes[4];
+    this.items[6] = &texts[1];
+    this.items[7] = &texts[2];
+
+    var Menu menu with
+        this.n     = 8;
+        this.items = items;
+        this.cur   = 1;
     end;
 
     await FOREVER;

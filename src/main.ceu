@@ -65,14 +65,26 @@ with
     end
 with
     loop do
-        var MainMenu main;
-        par/or do
-            await main.items[__MENUS_CEU_main_Exit].ui:ok_clicked;
-            break;
-        with
-            await main.items[__MENUS_CEU_main_Bonus].ui:ok_clicked;
+        var int ret = 0;
+        do
+            var MainMenu main;
+            par/or do
+                await main.items[__MENUS_CEU_main_Exit]:ui:ok_clicked;
+                break;
+            with
+                await main.items[__MENUS_CEU_main_Bonus]:ui:ok_clicked;
+                ret = 1;
+            with
+                await main.items[__MENUS_CEU_main_Options]:ui:ok_clicked;
+                ret = 2;
+            end
+        end
+        if ret == 1 then
             var BonusMenu bonus;
-            await bonus.items[__MENUS_CEU_bonus_Back].ui:ok_clicked;
+            await bonus.items[__MENUS_CEU_bonus_Back]:ui:ok_clicked;
+        else/if ret == 2 then
+            var OptionsMenu opts;
+            await opts.items[__MENUS_CEU_options_Back]:ui:ok_clicked;
         end
     end
 with
